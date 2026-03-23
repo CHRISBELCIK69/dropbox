@@ -15,15 +15,13 @@ DROPBOX_APP_SECRET    = os.environ["DROPBOX_APP_SECRET"]
 DROPBOX_REFRESH_TOKEN = os.environ["DROPBOX_REFRESH_TOKEN"]
 DROPBOX_FOLDER        = os.environ.get("DROPBOX_FOLDER", "/trades")
 
-ACCESS_TOKEN         = os.environ["ACCESS_TOKEN"]
-ACCOUNT_ID       = os.environ["ACCOUNT_ID"]
-API_BASE_URL      = os.environ.get("API_BASE_URL", "https://sandbox.tradier.com/v1")
+ACCESS_TOKEN          = os.environ["ACCESS_TOKEN"]
+ACCOUNT_ID            = os.environ["ACCOUNT_ID"]
+API_BASE_URL          = os.environ.get("API_BASE_URL", "https://sandbox.tradier.com/v1")
 
 OCR_API_KEY           = os.environ["OCR_API_KEY"]
 POLL_INTERVAL         = int(os.environ.get("POLL_INTERVAL", "5"))
 SAVE_FOLDER           = "/tmp/trades_images"
-
-IMAGE_EXTENSIONS      = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp"}
 
 os.makedirs(SAVE_FOLDER, exist_ok=True)
 
