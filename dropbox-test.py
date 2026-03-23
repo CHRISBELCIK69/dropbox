@@ -15,9 +15,9 @@ DROPBOX_APP_SECRET    = os.environ["DROPBOX_APP_SECRET"]
 DROPBOX_REFRESH_TOKEN = os.environ["DROPBOX_REFRESH_TOKEN"]
 DROPBOX_FOLDER        = os.environ.get("DROPBOX_FOLDER", "/trades")
 
-TRADIER_TOKEN         = os.environ["TRADIER_TOKEN"]
-TRADIER_ACCOUNT       = os.environ["TRADIER_ACCOUNT"]
-TRADIER_BASE_URL      = os.environ.get("TRADIER_BASE_URL", "https://sandbox.tradier.com/v1")
+ACCESS_TOKEN         = os.environ["TRADIER_TOKEN"]
+ACCOUNT_ID       = os.environ["TRADIER_ACCOUNT"]
+API_BASE_URL      = os.environ.get("TRADIER_BASE_URL", "https://sandbox.tradier.com/v1")
 
 OCR_API_KEY           = os.environ["OCR_API_KEY"]
 POLL_INTERVAL         = int(os.environ.get("POLL_INTERVAL", "5"))
