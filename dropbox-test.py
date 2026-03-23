@@ -161,7 +161,7 @@ def format_contracts(contracts):
 # ============================================
 tradier_session = requests.Session()
 tradier_session.headers.update({
-    "Authorization": f"Bearer {TRADIER_TOKEN}",
+    "Authorization": f"Bearer {ACCESS_TOKEN}",
     "Accept":        "application/json"
 })
 
