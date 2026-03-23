@@ -378,14 +378,3 @@ if __name__ == "__main__":
     poll()
 
 
-Add these variables in Railway under **Variables**:
-```
-DROPBOX_APP_KEY       = du01hjnbbztqys5
-DROPBOX_APP_SECRET    = rdw9oetsz396izs
-DROPBOX_REFRESH_TOKEN = your_refresh_token
-DROPBOX_FOLDER        = /trades
-TRADIER_TOKEN         = ejpyU1cstzEqr8L17SGO3GIerzlK
-TRADIER_ACCOUNT       = VA65780882
-TRADIER_BASE_URL      = https://sandbox.tradier.com/v1
-OCR_API_KEY           = K82765119988957
-POLL_INTERVAL         = 5
