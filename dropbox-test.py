@@ -8,7 +8,7 @@ import threading
 from datetime import datetime, timedelta
 
 # ============================================
-# CONFIGURATION — all from Railway env vars
+# CONFIGURATION
 # ============================================
 DROPBOX_APP_KEY       = os.environ["DROPBOX_APP_KEY"]
 DROPBOX_APP_SECRET    = os.environ["DROPBOX_APP_SECRET"]
@@ -23,9 +23,10 @@ OCR_API_KEY           = os.environ["OCR_API_KEY"]
 POLL_INTERVAL         = int(os.environ.get("POLL_INTERVAL", "5"))
 SAVE_FOLDER           = "/tmp/trades_images"
 
+IMAGE_EXTENSIONS      = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp"}
+
 os.makedirs(SAVE_FOLDER, exist_ok=True)
 
-IMAGE_EXTENSIONS      = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp"}
 # ============================================
 # DROPBOX
 # ============================================
@@ -179,7 +180,7 @@ def place_order(contract):
     print(f"\n🚀 Placing order: {contract['readable']}")
     try:
         resp = tradier_session.post(
-            f"{TRADIER_BASE_URL}/accounts/{TRADIER_ACCOUNT}/orders",
+            f"{API_BASE_URL}/accounts/{ACCOUNT_ID}/orders",
             data={
                 "class":         "option",
                 "symbol":        ticker,
@@ -203,7 +204,7 @@ def get_option_history(option_symbol, days=14):
     end_date   = datetime.now()
     start_date = end_date - timedelta(days=days)
     resp = tradier_session.get(
-        f"{TRADIER_BASE_URL}/markets/history",
+        f"{API_BASE_URL}/markets/history",
         params={
             "symbol":   option_symbol,
             "interval": "daily",
@@ -220,7 +221,7 @@ def get_option_history(option_symbol, days=14):
 
 def get_current_price(option_symbol):
     resp = tradier_session.get(
-        f"{TRADIER_BASE_URL}/markets/quotes",
+        f"{API_BASE_URL}/markets/quotes",
         params={"symbols": option_symbol, "greeks": "false"}
     )
     resp.raise_for_status()
@@ -229,7 +230,7 @@ def get_current_price(option_symbol):
 
 def sell_asset(option_symbol, underlying, quantity):
     resp = tradier_session.post(
-        f"{TRADIER_BASE_URL}/accounts/{TRADIER_ACCOUNT}/orders",
+        f"{API_BASE_URL}/accounts/{ACCOUNT_ID}/orders",
         data={
             "class":         "option",
             "symbol":        underlying,
@@ -375,5 +376,16 @@ def poll():
 
 if __name__ == "__main__":
     poll()
+```
 
-
+Railway variables:
+```
+DROPBOX_APP_KEY       = du01hjnbbztqys5
+DROPBOX_APP_SECRET    = rdw9oetsz396izs
+DROPBOX_REFRESH_TOKEN = your_refresh_token
+DROPBOX_FOLDER        = /trades
+ACCESS_TOKEN          = ejpyU1cstzEqr8L17SGO3GIerzlK
+ACCOUNT_ID            = VA65780882
+API_BASE_URL          = https://sandbox.tradier.com/v1
+OCR_API_KEY           = K82765119988957
+POLL_INTERVAL         = 5
