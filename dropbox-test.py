@@ -25,6 +25,7 @@ SAVE_FOLDER           = "/tmp/trades_images"
 
 os.makedirs(SAVE_FOLDER, exist_ok=True)
 
+IMAGE_EXTENSIONS      = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp"}
 # ============================================
 # DROPBOX
 # ============================================
