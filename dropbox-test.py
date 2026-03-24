@@ -5,7 +5,6 @@ import json
 import requests
 import time
 import threading
-import yagmail
 from datetime import datetime, timedelta
 
 # ============================================
@@ -21,8 +20,6 @@ ACCOUNT_ID            = os.environ["ACCOUNT_ID"]
 API_BASE_URL          = os.environ.get("API_BASE_URL", "https://sandbox.tradier.com/v1")
 
 OCR_API_KEY           = os.environ["OCR_API_KEY"]
-EMAIL                 = os.environ["EMAIL"]
-EMAIL_PASS            = os.environ["EMAIL_PASS"]
 POLL_INTERVAL         = int(os.environ.get("POLL_INTERVAL", "5"))
 SAVE_FOLDER           = "/tmp/trades_images"
 
@@ -203,13 +200,13 @@ def place_order(contract):
         print(f"❌ Order failed: {e}")
         return False
 
-def get_option_history(symbol, days=14):
+def get_option_history(option_symbol, days=14):
     end_date   = datetime.now()
     start_date = end_date - timedelta(days=days)
     resp = tradier_session.get(
         f"{API_BASE_URL}/markets/history",
         params={
-            "symbol":   symbol,
+            "symbol":   option_symbol,
             "interval": "daily",
             "start":    start_date.strftime("%Y-%m-%d"),
             "end":      end_date.strftime("%Y-%m-%d"),
@@ -222,10 +219,10 @@ def get_option_history(symbol, days=14):
     days_data = history.get("day", [])
     return days_data if isinstance(days_data, list) else [days_data]
 
-def get_current_price(symbol):
+def get_current_price(option_symbol):
     resp = tradier_session.get(
         f"{API_BASE_URL}/markets/quotes",
-        params={"symbols": symbol, "greeks": "false"}
+        params={"symbols": option_symbol, "greeks": "false"}
     )
     resp.raise_for_status()
     quote = resp.json().get("quotes", {}).get("quote", {})
@@ -249,73 +246,13 @@ def sell_asset(option_symbol, underlying, quantity):
     print(f"🔴 SOLD — ID: {result.get('id')}  Status: {result.get('status')}")
 
 # ============================================
-# EMAIL
-# ============================================
-def send_order_email(contract, buy_price, atr, stop_loss):
-    try:
-        body = f"""
-============================================================
-🚀 ORDER PLACED — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-============================================================
-
-OPRA Symbol  : {contract['occ_symbol']}
-Contract     : {contract['readable']}
-Type         : {contract['type']}
-Strike       : ${contract['strike']}
-Expiry       : {contract['expiry']}
-
-Buy Price    : ${buy_price}
-ATR          : {atr}
-Stop Loss    : ${stop_loss}
-
-============================================================
-        """
-        yag = yagmail.SMTP(EMAIL, EMAIL_PASS)
-        yag.send(
-            to=EMAIL,
-            subject=f"Order Placed — {contract['occ_symbol']} — {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-            contents=body
-        )
-        print(f"📧 Order email sent for {contract['occ_symbol']}")
-    except Exception as e:
-        print(f"❌ Email failed: {e}")
-
-def send_sell_email(option_symbol, entry, sell_price, atr, stop_loss):
-    try:
-        pnl     = round((sell_price - entry) * 100, 2)
-        pnl_pct = round(((sell_price - entry) / entry) * 100, 2) if entry else 0
-        body = f"""
-============================================================
-🔴 POSITION CLOSED — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-============================================================
-
-OPRA Symbol  : {option_symbol}
-
-Buy Price    : ${entry}
-Sell Price   : ${sell_price}
-P&L          : ${pnl} ({pnl_pct}%)
-ATR          : {atr}
-Stop Loss    : ${stop_loss}
-
-============================================================
-        """
-        yag = yagmail.SMTP(EMAIL, EMAIL_PASS)
-        yag.send(
-            to=EMAIL,
-            subject=f"Position Closed — {option_symbol} — {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-            contents=body
-        )
-        print(f"📧 Sell email sent for {option_symbol}")
-    except Exception as e:
-        print(f"❌ Email failed: {e}")
-
-# ============================================
 # ATR TRAILING STOP
 # ============================================
-def assign_stop(GAP, entry, option_symbol, underlying, quantity, atr, stop_loss):
+def assign_stop(GAP, entry, option_symbol, underlying, quantity):
+    initial_stop  = round(entry - GAP, 2)
     highest_price = entry
-    trailing_stop = stop_loss
-    print(f"[{option_symbol}] Initial stop: {trailing_stop}  (GAP={GAP})")
+    trailing_stop = initial_stop
+    print(f"[{option_symbol}] Initial stop: {initial_stop}  (GAP={GAP})")
 
     while True:
         try:
@@ -335,7 +272,6 @@ def assign_stop(GAP, entry, option_symbol, underlying, quantity, atr, stop_loss)
 
             if current_price <= trailing_stop:
                 sell_asset(option_symbol, underlying, quantity)
-                send_sell_email(option_symbol, entry, current_price, atr, trailing_stop)
                 with positions_lock:
                     active_positions.discard(option_symbol)
                 break
@@ -345,22 +281,22 @@ def assign_stop(GAP, entry, option_symbol, underlying, quantity, atr, stop_loss)
 
         time.sleep(5)
 
-def start_atr_monitor(contract, entry, quantity):
-    option_symbol = contract["occ_symbol"]
-    underlying    = re.match(r'^([A-Z]+)', option_symbol).group(1)
+def start_atr_monitor(option_symbol, entry, quantity):
+    underlying = re.match(r'^([A-Z]+)', option_symbol).group(1)
 
     bars = get_option_history(option_symbol, days=14)
     if not bars:
         print(f"[{option_symbol}] No history — skipping ATR")
         return
 
-    true_ranges = [
-        max(
-            b["high"] - b["low"],
-            abs(b["high"] - b["close"]),
-            abs(b["close"] - b["low"])
-        ) for b in bars
-    ]
+    true_ranges = []
+    for bar in bars:
+        tr = max(
+            bar["high"] - bar["low"],
+            abs(bar["high"] - bar["close"]),
+            abs(bar["close"] - bar["low"])
+        )
+        true_ranges.append(round(tr, 2))
 
     atr     = round(sum(true_ranges) / len(true_ranges), 2)
     GAP     = atr
@@ -370,18 +306,14 @@ def start_atr_monitor(contract, entry, quantity):
         print(f"[{option_symbol}] GAP {GAP} clamped to 30% → {max_gap}")
         GAP = max_gap
 
-    stop_loss = round(entry - GAP, 2)
-    print(f"[{option_symbol}] entry={entry}  ATR={atr}  GAP={GAP}  stop={stop_loss}")
-
-    # Send buy email with all details
-    send_order_email(contract, entry, atr, stop_loss)
+    print(f"[{option_symbol}] entry={entry}  ATR={atr}  GAP={GAP}  stop={round(entry - GAP, 2)}")
 
     with positions_lock:
         active_positions.add(option_symbol)
 
     t = threading.Thread(
         target=assign_stop,
-        args=(GAP, entry, option_symbol, underlying, quantity, atr, stop_loss),
+        args=(GAP, entry, option_symbol, underlying, quantity),
         daemon=True
     )
     t.start()
@@ -415,7 +347,7 @@ def process_image(entry):
         if success:
             time.sleep(2)
             start_atr_monitor(
-                contract=contract,
+                option_symbol=contract["occ_symbol"],
                 entry=contract["strike"],
                 quantity=1
             )
