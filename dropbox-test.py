@@ -5,6 +5,7 @@ import json
 import requests
 import time
 import threading
+import yagmail
 from datetime import datetime, timedelta
 
 # ============================================
@@ -14,14 +15,16 @@ DROPBOX_APP_KEY       = os.environ["DROPBOX_APP_KEY"]
 DROPBOX_APP_SECRET    = os.environ["DROPBOX_APP_SECRET"]
 DROPBOX_REFRESH_TOKEN = os.environ["DROPBOX_REFRESH_TOKEN"]
 DROPBOX_FOLDER        = os.environ.get("DROPBOX_FOLDER", "/trades")
+SAVE_FOLDER           = "/tmp/trades_images"
 
 ACCESS_TOKEN          = os.environ["ACCESS_TOKEN"]
 ACCOUNT_ID            = os.environ["ACCOUNT_ID"]
 API_BASE_URL          = os.environ.get("API_BASE_URL", "https://sandbox.tradier.com/v1")
 
 OCR_API_KEY           = os.environ["OCR_API_KEY"]
-POLL_INTERVAL         = int(os.environ.get("POLL_INTERVAL", "5"))
-SAVE_FOLDER           = "/tmp/trades_images"
+EMAIL                 = os.environ["EMAIL"]
+EMAIL_PASS            = os.environ["EMAIL_PASS"]
+POLL_INTERVAL         = 5
 
 IMAGE_EXTENSIONS      = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp"}
 
@@ -37,9 +40,9 @@ try:
         oauth2_refresh_token=DROPBOX_REFRESH_TOKEN
     )
     name = dbx.users_get_current_account().name.display_name
-    print(f"✅ Connected to Dropbox as: {name}")
+    print(f"Connected to Dropbox as: {name}")
 except Exception as e:
-    print(f"❌ Dropbox connection failed: {e}")
+    print(f"Dropbox connection failed: {e}")
     exit(1)
 
 processed_files  = set()
@@ -60,15 +63,15 @@ def download_file(dropbox_path, filename):
     _, response = dbx.files_download(dropbox_path)
     with open(save_path, "wb") as f:
         f.write(response.content)
-    print(f"✅ Downloaded: {filename}")
+    print(f"Downloaded: {filename}")
     return save_path
 
 # ============================================
 # OCR
 # ============================================
 def ocr_image(image_path, retries=3):
-    print(f"🔍 Running OCR on: {os.path.basename(image_path)}")
-    
+    print(f"Running OCR on: {os.path.basename(image_path)}")
+
     for attempt in range(1, retries + 1):
         try:
             with open(image_path, "rb") as f:
@@ -83,31 +86,32 @@ def ocr_image(image_path, retries=3):
                         "scale":             "true",
                         "OCREngine":         "2"
                     },
-                    timeout=60  # increased from 30
+                    timeout=60
                 )
             resp.raise_for_status()
             result = resp.json()
 
             if result.get("IsErroredOnProcessing"):
-                print(f"❌ OCR error: {result.get('ErrorMessage')}")
+                print(f"OCR error: {result.get('ErrorMessage')}")
                 return None
 
             parsed = result.get("ParsedResults", [])
             if not parsed:
+                print("No parsed results")
                 return None
 
             text = parsed[0].get("ParsedText", "").strip()
             return text if text else None
 
         except requests.exceptions.Timeout:
-            print(f"⚠️  OCR timeout — attempt {attempt}/{retries}")
+            print(f"OCR timeout — attempt {attempt}/{retries}")
             if attempt < retries:
                 time.sleep(5)
             else:
-                print("❌ OCR failed after all retries")
+                print("OCR failed after all retries")
                 return None
         except Exception as e:
-            print(f"❌ OCR error: {e}")
+            print(f"OCR error: {e}")
             return None
 
 # ============================================
@@ -165,15 +169,18 @@ def to_occ_symbol(ticker, strike, cp, expiry):
     return f"{ticker.upper()}{expiry_code}{cp.upper()}{strike_code}"
 
 def format_contracts(contracts):
-    expiry = get_next_friday()
-    return [{
-        "ticker":     ticker,
-        "strike":     float(strike),
-        "type":       "Call" if cp == "C" else "Put",
-        "expiry":     expiry,
-        "occ_symbol": to_occ_symbol(ticker, strike, cp, expiry),
-        "readable":   f"{ticker} {strike} {'Call' if cp == 'C' else 'Put'} exp {expiry}"
-    } for ticker, strike, cp in contracts]
+    expiry  = get_next_friday()
+    results = []
+    for ticker, strike, cp in contracts:
+        results.append({
+            "ticker":     ticker,
+            "strike":     float(strike),
+            "type":       "Call" if cp == "C" else "Put",
+            "expiry":     expiry,
+            "occ_symbol": to_occ_symbol(ticker, strike, cp, expiry),
+            "readable":   f"{ticker} {strike} {'Call' if cp == 'C' else 'Put'} exp {expiry}"
+        })
+    return results
 
 # ============================================
 # TRADIER
@@ -191,10 +198,15 @@ def place_order(contract):
     ticker = contract["ticker"]
 
     if symbol in placed_orders:
-        print(f"⏭️  Already ordered: {symbol}")
+        print(f"Order already placed for: {symbol}")
         return False
 
-    print(f"\n🚀 Placing order: {contract['readable']}")
+    print(f"\n{'='*50}")
+    print(f"PLACING ORDER")
+    print(f"   Contract : {contract['readable']}")
+    print(f"   OCC      : {symbol}")
+    print(f"{'='*50}")
+
     try:
         resp = tradier_session.post(
             f"{API_BASE_URL}/accounts/{ACCOUNT_ID}/orders",
@@ -210,20 +222,20 @@ def place_order(contract):
         )
         resp.raise_for_status()
         result = resp.json().get("order", {})
-        print(f"✅ Order placed — ID: {result.get('id')}  Status: {result.get('status')}")
+        print(f"Order placed — ID: {result.get('id')}  Status: {result.get('status')}")
         placed_orders.add(symbol)
         return True
     except Exception as e:
-        print(f"❌ Order failed: {e}")
+        print(f"Order failed for {symbol}: {e}")
         return False
 
-def get_option_history(option_symbol, days=14):
+def get_option_history(symbol, days=14):
     end_date   = datetime.now()
     start_date = end_date - timedelta(days=days)
     resp = tradier_session.get(
         f"{API_BASE_URL}/markets/history",
         params={
-            "symbol":   option_symbol,
+            "symbol":   symbol,
             "interval": "daily",
             "start":    start_date.strftime("%Y-%m-%d"),
             "end":      end_date.strftime("%Y-%m-%d"),
@@ -236,10 +248,10 @@ def get_option_history(option_symbol, days=14):
     days_data = history.get("day", [])
     return days_data if isinstance(days_data, list) else [days_data]
 
-def get_current_price(option_symbol):
+def get_current_price(symbol):
     resp = tradier_session.get(
         f"{API_BASE_URL}/markets/quotes",
-        params={"symbols": option_symbol, "greeks": "false"}
+        params={"symbols": symbol, "greeks": "false"}
     )
     resp.raise_for_status()
     quote = resp.json().get("quotes", {}).get("quote", {})
@@ -260,16 +272,76 @@ def sell_asset(option_symbol, underlying, quantity):
     )
     resp.raise_for_status()
     result = resp.json().get("order", {})
-    print(f"🔴 SOLD — ID: {result.get('id')}  Status: {result.get('status')}")
+    print(f"SOLD — ID: {result.get('id')}  Status: {result.get('status')}")
+
+# ============================================
+# EMAIL
+# ============================================
+def send_order_email(contract, buy_price, atr, stop_loss):
+    try:
+        body = f"""
+============================================================
+ORDER PLACED — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+============================================================
+
+OPRA Symbol  : {contract['occ_symbol']}
+Contract     : {contract['readable']}
+Type         : {contract['type']}
+Strike       : ${contract['strike']}
+Expiry       : {contract['expiry']}
+
+Buy Price    : ${buy_price}
+ATR          : {atr}
+Stop Loss    : ${stop_loss}
+
+============================================================
+        """
+        yag = yagmail.SMTP(EMAIL, EMAIL_PASS)
+        yag.send(
+            to=EMAIL,
+            subject=f"Order Placed — {contract['occ_symbol']} — {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            contents=body
+        )
+        print(f"Order email sent for {contract['occ_symbol']}")
+    except Exception as e:
+        print(f"Email failed: {e}")
+
+def send_sell_email(option_symbol, entry, sell_price, atr, stop_loss):
+    try:
+        pnl     = round((sell_price - entry) * 100, 2)
+        pnl_pct = round(((sell_price - entry) / entry) * 100, 2) if entry else 0
+        body = f"""
+============================================================
+POSITION CLOSED — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+============================================================
+
+OPRA Symbol  : {option_symbol}
+
+Buy Price    : ${entry}
+Sell Price   : ${sell_price}
+P&L          : ${pnl} ({pnl_pct}%)
+ATR          : {atr}
+Stop Loss    : ${stop_loss}
+
+============================================================
+        """
+        yag = yagmail.SMTP(EMAIL, EMAIL_PASS)
+        yag.send(
+            to=EMAIL,
+            subject=f"Position Closed — {option_symbol} — {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            contents=body
+        )
+        print(f"Sell email sent for {option_symbol}")
+    except Exception as e:
+        print(f"Email failed: {e}")
 
 # ============================================
 # ATR TRAILING STOP
 # ============================================
-def assign_stop(GAP, entry, option_symbol, underlying, quantity):
-    initial_stop  = round(entry - GAP, 2)
+def assign_stop(GAP, entry, option_symbol, underlying, quantity, atr, stop_loss):
     highest_price = entry
-    trailing_stop = initial_stop
-    print(f"[{option_symbol}] Initial stop: {initial_stop}  (GAP={GAP})")
+    trailing_stop = stop_loss
+    print(f"[{option_symbol}] Initial stop: {trailing_stop}  (GAP={GAP})")
 
     while True:
         try:
@@ -289,6 +361,7 @@ def assign_stop(GAP, entry, option_symbol, underlying, quantity):
 
             if current_price <= trailing_stop:
                 sell_asset(option_symbol, underlying, quantity)
+                send_sell_email(option_symbol, entry, current_price, atr, trailing_stop)
                 with positions_lock:
                     active_positions.discard(option_symbol)
                 break
@@ -298,73 +371,79 @@ def assign_stop(GAP, entry, option_symbol, underlying, quantity):
 
         time.sleep(5)
 
-def start_atr_monitor(option_symbol, entry, quantity):
-    underlying = re.match(r'^([A-Z]+)', option_symbol).group(1)
+def start_atr_monitor(contract, entry, quantity):
+    option_symbol = contract["occ_symbol"]
+    underlying    = re.match(r'^([A-Z]+)', option_symbol).group(1)
 
     bars = get_option_history(option_symbol, days=14)
     if not bars:
         print(f"[{option_symbol}] No history — skipping ATR")
         return
 
-    true_ranges = []
-    for bar in bars:
-        tr = max(
-            bar["high"] - bar["low"],
-            abs(bar["high"] - bar["close"]),
-            abs(bar["close"] - bar["low"])
-        )
-        true_ranges.append(round(tr, 2))
+    true_ranges = [
+        max(
+            b["high"] - b["low"],
+            abs(b["high"] - b["close"]),
+            abs(b["close"] - b["low"])
+        ) for b in bars
+    ]
 
     atr     = round(sum(true_ranges) / len(true_ranges), 2)
     GAP     = atr
     max_gap = round(entry * 0.30, 2)
 
     if GAP > max_gap:
-        print(f"[{option_symbol}] GAP {GAP} clamped to 30% → {max_gap}")
+        print(f"[{option_symbol}] GAP {GAP} clamped to 30% — {max_gap}")
         GAP = max_gap
 
-    print(f"[{option_symbol}] entry={entry}  ATR={atr}  GAP={GAP}  stop={round(entry - GAP, 2)}")
+    stop_loss = round(entry - GAP, 2)
+    print(f"[{option_symbol}] entry={entry}  ATR={atr}  GAP={GAP}  stop={stop_loss}")
+
+    send_order_email(contract, entry, atr, stop_loss)
 
     with positions_lock:
         active_positions.add(option_symbol)
 
     t = threading.Thread(
         target=assign_stop,
-        args=(GAP, entry, option_symbol, underlying, quantity),
+        args=(GAP, entry, option_symbol, underlying, quantity, atr, stop_loss),
         daemon=True
     )
     t.start()
 
 # ============================================
-# IMAGE PROCESSING PIPELINE
+# PROCESS A SINGLE IMAGE
 # ============================================
 def process_image(entry):
-    print(f"\n📸 New image: {entry.name}")
+    print(f"\nNew image detected: {entry.name}")
 
     local_path = download_file(entry.path_display, entry.name)
 
     text = ocr_image(local_path)
     if not text:
-        print("⚠️  No text extracted")
+        print("No text extracted from image")
         return
 
-    print(f"\n📄 OCR Text:\n{'-'*30}\n{text}\n{'-'*30}")
+    print(f"\nOCR Text:\n{'-'*30}\n{text}\n{'-'*30}")
 
     contracts = parse_contracts(text)
     if not contracts:
-        print("⚠️  No contracts found")
+        print("No contracts found in text")
         return
 
     formatted = format_contracts(contracts)
 
-    for contract in formatted:
-        print(f"\n🎯 {contract['readable']}  OCC: {contract['occ_symbol']}")
-        success = place_order(contract)
+    print(f"\nContracts found:")
+    for c in formatted:
+        print(f"   {c['readable']}")
+        print(f"   OCC: {c['occ_symbol']}")
 
+    for contract in formatted:
+        success = place_order(contract)
         if success:
             time.sleep(2)
             start_atr_monitor(
-                option_symbol=contract["occ_symbol"],
+                contract=contract,
                 entry=contract["strike"],
                 quantity=1
             )
@@ -373,8 +452,8 @@ def process_image(entry):
 # POLLING LOOP
 # ============================================
 def poll():
-    print(f"\n👀 Polling Dropbox every {POLL_INTERVAL}s")
-    print(f"📁 Folder: {DROPBOX_FOLDER}\n")
+    print(f"\nPolling Dropbox every {POLL_INTERVAL}s — waiting for new images...")
+    print(f"Folder: {DROPBOX_FOLDER}\n")
 
     while True:
         try:
@@ -385,9 +464,9 @@ def poll():
                     t = threading.Thread(target=process_image, args=(entry,), daemon=True)
                     t.start()
             else:
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] Waiting...", end="\r")
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] No new images", end="\r")
         except Exception as e:
-            print(f"❌ Poll error: {e}")
+            print(f"Poll error: {e}")
 
         time.sleep(POLL_INTERVAL)
 
