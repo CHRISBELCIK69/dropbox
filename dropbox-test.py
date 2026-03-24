@@ -66,32 +66,49 @@ def download_file(dropbox_path, filename):
 # ============================================
 # OCR
 # ============================================
-def ocr_image(image_path):
+def ocr_image(image_path, retries=3):
     print(f"🔍 Running OCR on: {os.path.basename(image_path)}")
-    with open(image_path, "rb") as f:
-        resp = requests.post(
-            "https://api.ocr.space/parse/image",
-            headers={"apikey": OCR_API_KEY},
-            files={"file": f},
-            data={
-                "language":          "eng",
-                "isOverlayRequired": "false",
-                "detectOrientation": "false",
-                "scale":             "true",
-                "OCREngine":         "2"
-            },
-            timeout=30
-        )
-    resp.raise_for_status()
-    result = resp.json()
-    if result.get("IsErroredOnProcessing"):
-        print(f"❌ OCR error: {result.get('ErrorMessage')}")
-        return None
-    parsed = result.get("ParsedResults", [])
-    if not parsed:
-        return None
-    text = parsed[0].get("ParsedText", "").strip()
-    return text if text else None
+    
+    for attempt in range(1, retries + 1):
+        try:
+            with open(image_path, "rb") as f:
+                resp = requests.post(
+                    "https://api.ocr.space/parse/image",
+                    headers={"apikey": OCR_API_KEY},
+                    files={"file": f},
+                    data={
+                        "language":          "eng",
+                        "isOverlayRequired": "false",
+                        "detectOrientation": "false",
+                        "scale":             "true",
+                        "OCREngine":         "2"
+                    },
+                    timeout=60  # increased from 30
+                )
+            resp.raise_for_status()
+            result = resp.json()
+
+            if result.get("IsErroredOnProcessing"):
+                print(f"❌ OCR error: {result.get('ErrorMessage')}")
+                return None
+
+            parsed = result.get("ParsedResults", [])
+            if not parsed:
+                return None
+
+            text = parsed[0].get("ParsedText", "").strip()
+            return text if text else None
+
+        except requests.exceptions.Timeout:
+            print(f"⚠️  OCR timeout — attempt {attempt}/{retries}")
+            if attempt < retries:
+                time.sleep(5)
+            else:
+                print("❌ OCR failed after all retries")
+                return None
+        except Exception as e:
+            print(f"❌ OCR error: {e}")
+            return None
 
 # ============================================
 # CONTRACT PARSING
