@@ -135,7 +135,7 @@ TICKERS = {
 def parse_contracts(text):
     text = ' '.join(text.upper().split())
     pattern_tickers = r'(?:' + '|'.join(map(re.escape, TICKERS)) + r')'
-   patterns = [
+    patterns = [
     # standard C/P including Cyrillic lookalikes р and с
     rf'\b({pattern_tickers})\s*(\d+(?:\.\d+)?)\s*([CPрс])\b',
     rf'\b({pattern_tickers})\s*\$?\s*(\d+(?:\.\d+)?)\s*([CPрс])\b',
