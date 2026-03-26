@@ -135,19 +135,24 @@ TICKERS = {
 def parse_contracts(text):
     text = ' '.join(text.upper().split())
     pattern_tickers = r'(?:' + '|'.join(map(re.escape, TICKERS)) + r')'
-    patterns = [
-        rf'\b({pattern_tickers})\s*(\d+(?:\.\d+)?)\s*([CP])\b',
-        rf'\b({pattern_tickers})\s*\$?\s*(\d+(?:\.\d+)?)\s*([CP])\b',
-        rf'\b({pattern_tickers})\s*(\d+(?:\.\d+)?)\s*(CALL|PUT)',
+   patterns = [
+    # standard C/P including Cyrillic lookalikes р and с
+    rf'\b({pattern_tickers})\s*(\d+(?:\.\d+)?)\s*([CPрс])\b',
+    rf'\b({pattern_tickers})\s*\$?\s*(\d+(?:\.\d+)?)\s*([CPрс])\b',
+    rf'\b({pattern_tickers})\s*(\d+(?:\.\d+)?)\s*(CALL|PUT)',
     ]
     results = set()
     for pattern in patterns:
         for m in re.finditer(pattern, text, re.IGNORECASE):
             ticker = m.group(1).upper()
             strike = m.group(2)
-            cp     = m.group(3).upper()
-            if cp == "CALL": cp = "C"
-            if cp == "PUT":  cp = "P"
+            cp = m.group(3).upper()
+            if cp in ("CALL"):  cp = "C"
+            if cp in ("PUT"):   cp = "P"
+            if cp == "Р":       cp = "P"  # CyrillicР
+            if cp == "С":       cp = "C"  # Cyrillic С
+            if cp == "р":       cp = "P"  # Cyrillic р
+            if cp == "с":       cp = "C"  # Cyrillic с
             try:
                 if 0.5 <= float(strike) <= 10000:
                     results.add((ticker, strike, cp))
